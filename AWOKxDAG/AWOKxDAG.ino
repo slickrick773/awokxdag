@@ -14,9 +14,11 @@
     !defined(AWOK_DUAL_ESP32_TOUCH_BRIDGE_V3) && \
     !defined(AWOK_DUAL_ESP32_MINI_BRIDGE_V1) && \
     !defined(AWOK_DUAL_ESP32_MINI_BRIDGE_V2) && \
-    !defined(AWOK_DUAL_ESP32_MINI_BRIDGE_V3) && !defined(AWOK_CARDPUTER_V11)
+    !defined(AWOK_DUAL_ESP32_MINI_BRIDGE_V3) && !defined(AWOK_CARDPUTER_V11) && \
+    !defined(AWOK_WAVESHARE_C5_35)
 //#define AWOK_DUAL_C5_TOUCH
 //#define PANCAKE_C5
+//#define AWOK_WAVESHARE_C5_35
 //#define AWOK_NM_CYD_C5
 #define AWOK_DUAL_C5_MINI
 //#define AWOK_DUAL_ESP32_TOUCH_V1
@@ -2659,6 +2661,25 @@ void initializeDisplayAndTouch() {
   }
 #endif
   display.setTextWrap(false);
+#elif defined(AWOK_WAVESHARE_C5_35)
+  // Waveshare C5 3.5: the CH32V006 expander owns panel power, the ST7796 and
+  // FT6336 resets, and the backlight PWM -- there is NO backlight GPIO -- so it
+  // must come up on the shared I2C bus BEFORE the display and touch. The ST7796
+  // and microSD share the SPI bus; the FT6336/expander/PMU/GPS share the I2C bus.
+  pinMode(AwokPins::kDisplayCs, OUTPUT);
+  pinMode(AwokPins::kSdCs, OUTPUT);
+  digitalWrite(AwokPins::kDisplayCs, HIGH);
+  digitalWrite(AwokPins::kSdCs, HIGH);
+  WsC5::busBegin();          // shared I2C @ 100 kHz (SDA 27 / SCL 26)
+  WsC5::Expander::begin();   // panel power + LCD/TP resets + backlight (PWM 0xFF)
+  SPI.begin(AwokPins::kSpiSck, AwokPins::kSpiMiso, AwokPins::kSpiMosi, -1);
+  // 80 MHz push clock is HW-verified on this panel (rated 60; holds). Drop toward
+  // 40 MHz here if a unit shows SPI artifacts. Reset is -1: the expander did it.
+  display.begin(80000000);
+  display.setRotation(0);
+  display.setTextWrap(false);
+  touch.begin();             // FT6336 chip-id + threshold + INT gate (expander reset it)
+  WsC5::Battery::begin();    // AXP2101 fuel gauge over raw I2C (no XPowersLib)
 #elif defined(PANCAKE_DISPLAY)
   // Pancake C5: ST7796 on the FSPI bus, FT6336 capacitive touch on I2C. Touch
   // has no SPI chip select, so there is no CS juggling as on the XPT2046 path.
