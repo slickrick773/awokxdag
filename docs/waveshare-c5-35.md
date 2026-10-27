@@ -1,6 +1,6 @@
 # Waveshare ESP32-C5-Touch-LCD-3.5 port
 
-Status: **experimental / compile-tested; physical validation required**.
+Status: **hardware-validated** on the Waveshare ESP32-C5-Touch-LCD-3.5 (2026-10-27).
 
 This profile (`AWOK_WAVESHARE_C5_35`) targets the Waveshare
 ESP32-C5-Touch-LCD-3.5: an ESP32-C5 (dual-band 2.4/5 GHz Wi-Fi + BLE) with a
@@ -108,25 +108,36 @@ RST, release BOOT**, then upload.
   battery) runs from `loop()`, so bus access is serialised without a mutex. Keep
   blocking work off the loop so touch stays responsive.
 
-## Physical validation checklist
+## Hardware validation
 
-Do not mark any capability "supported" until it is observed on a real board.
+Verified on a physical Waveshare ESP32-C5-Touch-LCD-3.5 on 2026-10-27 (esp32
+core 3.3.10 build, flashed with `tools/c5flash`):
 
-- Boot artwork fills the 320 × 480 panel with correct colours; backlight dimming
-  in Settings works (it drives the expander PWM, not a GPIO).
-- Settings → Screen test: capacitive touch tracks with no phantom taps at boot
-  (INT gate), and all regions register.
-- Wi-Fi scans both 2.4 and 5 GHz; BLE starts and stops without a controller
-  allocation failure.
-- The microSD mounts, creates `/awokxdag`, writes a capture, and reads it back.
-- GPS: a boot I²C scan shows `0x50`; the LC76G gets a fix and sets system UTC
-  while touch stays smooth.
-- AXP2101: the Status screen shows a rising percent while charging with a cell
-  fitted, and "USB" with no cell.
+- **Boot** — clean, no ROM `invalid header`; the profile selects correctly
+  (`Waveshare C5 3.5`, ESP32-C5 2.4/5 GHz), PSRAM 8 MB.
+- **Display** — ST7796 renders and the UI is usable at native 320 × 480.
+- **Touch** — INT-gated FT6336 is responsive with no phantom taps at boot (see
+  the bring-up note below).
+- **Dual-band Wi-Fi** — one scan returned 42 access points across 2.4 GHz
+  (ch 1/2/4/6/11) and 5 GHz (ch 36/40/44/52/149/157/161), no scan errors.
+- **microSD** — mounts at `/awokxdag` and writes the scan / saved-network CSVs.
+- **GPS (LC76G over I²C)** — `0x50` detected on the shared bus, NMEA streams into
+  TinyGPSPlus, and a real satellite fix set the AxD clock and resolved the local
+  timezone.
+- **AXP2101** — PMU detected at `0x34` (id `0x4A`) and read over raw I²C.
 
-If touch is mirrored or offset, capture the raw values from the screen test
-before changing anything; if the panel is dark after a flash, read the console
-for `invalid header` before suspecting the display.
+Bring-up note: with no (or a mis-wired) GPS, the GPS I²C cycle must not keep
+writing to the shared bus or it starves the FT6336 touch reads on that same bus
+(laggy/stuck input, traced on first bring-up). The driver gates the cycle on a
+silent `0x50` presence probe and only polls once the module answers. If `0x50`
+never appears, check the SDA/SCL wiring first — swapping them is the classic
+miss. If the panel is dark right after a flash, read the console for
+`invalid header` (bad flash-mode byte) before suspecting the display.
+
+Not yet separately exercised on hardware (all coded, none observed in the
+validation session): backlight dimming via the expander PWM, a BLE scan, and the
+battery-percent readout with a cell fitted. A satellite fix needs antenna sky
+view (a cold start near a window took a few minutes).
 
 ## Future work / follow-up
 
