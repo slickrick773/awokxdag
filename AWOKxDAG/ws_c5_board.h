@@ -196,17 +196,42 @@ static bool wake() {
   return ok;
 }
 
+static bool     s_present   = false;  // 0x50 answered a probe
+static uint32_t s_lastProbe = 0;
+static const uint32_t kReprobeMs = 5000;  // silent re-probe cadence when absent
+
+// Silent presence check for the GPS at 0x50. A zero-byte transaction takes the
+// i2c *probe* path (logs at verbose, not error, on a NACK), so a board with no
+// GPS wired makes no noise. Gates the heavy read cycle below: that cycle writes
+// to 0x50/0x54/0x58, and with no module every write errors and thrashes the
+// shared I2C bus that touch rides -- which shows up as laggy/stuck UI input.
+static bool probe() {
+  TimeoutGuard to(100);
+  busReopen();
+  Wire.beginTransmission(kCmdAddr);
+  return Wire.endTransmission() == 0;
+}
+
 // One service step. Throttled to kPeriodMs; skipped while the UI is being used
-// (busyUntilMs in the future) so touch stays smooth. Returns bytes fed to sink.
+// (busyUntilMs in the future) so touch stays smooth. The multi-write cycle runs
+// only once 0x50 has answered a probe; when absent we re-probe at most every
+// kReprobeMs so a later-wired module is still picked up without flooding the bus.
 static int tick(void (*sink)(char), uint32_t now, uint32_t busyUntilMs) {
   static uint32_t s_lastAt = 0;
   static uint8_t  s_empty  = 0;
   if (s_lastAt && now - s_lastAt < kPeriodMs) return 0;
   if (busyUntilMs && (int32_t)(busyUntilMs - now) > 0) return 0;  // defer while touched
   s_lastAt = now ? now : 1;
+  if (!s_present) {
+    if (s_lastProbe && (uint32_t)(now - s_lastProbe) < kReprobeMs) return 0;
+    s_lastProbe = now ? now : 1;
+    s_present = probe();
+    if (!s_present) return 0;  // no module: leave the bus (and touch) alone
+  }
   int r = poll(sink);
+  if (r < 0) { s_present = false; s_lastProbe = now ? now : 1; return r; }  // lost it: re-probe
   if (r == 0) { if (++s_empty >= 8) { s_empty = 0; wake(); } }
-  else if (r > 0) { s_empty = 0; }
+  else { s_empty = 0; }
   return r;
 }
 }  // namespace Gps
